@@ -5,11 +5,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
+#include <linux/input.h>
 #include "beagleboy.h"
 
 int fd_x = -1;
 int fd_y = -1;
-int fd_a = -1;
 int fd_b = -1;
 
 int bb_a = 0;
@@ -17,6 +17,8 @@ int bb_b = 0;
 
 int raw_bb_joy_x = -1;
 int raw_bb_joy_y = -1;
+
+struct input_event buttons;
 
 // compensated values
 int bb_joy_x = -1;
@@ -28,21 +30,20 @@ int min_y, max_y;
 int center_x, center_y;
 
 void bb_init() {
-	fd_x = open("/home/root/AIN0", O_RDONLY);
-	fd_y = open("/home/root/AIN2", O_RDONLY);
-	fd_a = open("/sys/class/gpio/gpio61/value", O_RDONLY);
-	fd_b = open("/sys/class/gpio/gpio49/value", O_RDONLY);
+	fd_x = open("/usr/share/gamingcape/AIN0", O_RDONLY);
+	fd_y = open("/usr/share/gamingcape/AIN2", O_RDONLY);
+	fd_b = open("/usr/share/gamingcape/BUTTONS", O_RDONLY);
+	int flags = fcntl(fd_b, F_GETFL, 0);
+	fcntl(fd_b, F_SETFL, flags | O_NONBLOCK);
 
 	if (!fd_x) { printf("could not open joy x\n"); }
-	if (!fd_y) { printf("could not open joy x\n"); }
-	if (!fd_a) { printf("could not open button a\n"); }
-	if (!fd_b) { printf("could not open button b\n"); }
+	if (!fd_y) { printf("could not open joy y\n"); }
+	if (!fd_b) { printf("could not open buttons\n"); }
 }
 
 void bb_close() {
 	close(fd_x);
 	close(fd_y);
-	close(fd_a);
 	close(fd_b);
 }
 
@@ -50,33 +51,22 @@ void bb_close() {
 void bb_refresh() {
 	char buf_x[100];
 	char buf_y[100];
-	char buf_a[100];
-	char buf_b[100];
 
 	memset(buf_x, 0, 100);
 	memset(buf_y, 0, 100);
-	memset(buf_a, 0, 100);
-	memset(buf_b, 0, 100);
 
 	int ret_x = read(fd_x, buf_x, sizeof(buf_x));
 	int ret_y = read(fd_y, buf_y, sizeof(buf_y));
-	int ret_a = read(fd_a, buf_a, sizeof(buf_a));
-	int ret_b = read(fd_b, buf_b, sizeof(buf_b));
+	int ret_b = read(fd_b, &buttons, sizeof(buttons));
 
 	if ((ret_x != -1) &&
-	    (ret_y != -1) &&
-	    (ret_a != -1) &&
-	    (ret_b != -1)) {
+	    (ret_y != -1)) {
 
 		buf_x[ret_x-1] = '\0';
 		buf_y[ret_y-1] = '\0';
-		buf_a[ret_a-1] = '\0';
-		buf_b[ret_b-1] = '\0';
 
 		raw_bb_joy_x = atoi(buf_x);
 		raw_bb_joy_y = atoi(buf_y);
-		bb_a = !atoi(buf_a);
-		bb_b = !atoi(buf_b);
 
 		// compensate using calibration data
 		bb_joy_x = (raw_bb_joy_x - center_x) * 1000;
@@ -88,15 +78,29 @@ void bb_refresh() {
 
 		lseek(fd_x,0,0);
 		lseek(fd_y,0,0);
-		lseek(fd_a,0,0);
-		lseek(fd_b,0,0);
+
+		// update button status globals
+		if ((ret_b > 0) &&
+		    (buttons.code == BTN_LEFT) &&
+		    (buttons.value == 1)) {
+			bb_a = 1;
+		} else {
+			bb_a = 0;
+		}
+		if ((ret_b > 0) &&
+		    (buttons.code == BTN_RIGHT) &&
+		    (buttons.value == 1)) {
+			bb_b = 1;
+		} else {
+			bb_b = 0;
+		}
 	}
 
 }
 void bb_cal() {
 
 	FILE *file;
-	file = fopen("/home/root/cal.txt", "w");
+	file = fopen("/usr/share/gamingcape/cal.txt", "w");
 	if (!file) printf("Failed to open cal.txt\n");
 
 	bb_refresh();
@@ -138,7 +142,7 @@ void bb_cal() {
 
 void bb_load_cal() {
 	FILE *file;
-	file = fopen("/home/root/cal.txt", "r");
+	file = fopen("/usr/share/gamingcape/cal.txt", "r");
 	if (!file) printf("Failed to open cal.txt\n");
 	fscanf(file, "%i,%i,%i,%i,%i,%i", &min_x, &center_x, &max_x, &min_y, &center_y, &max_y);
 	fclose(file);
